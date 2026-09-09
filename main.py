@@ -5,9 +5,15 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from datetime import datetime
 
-TOKEN = os.getenv("TELEGRAM_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")
+TOKEN = os.getenv("TELEGRAM_TOKEN", "").strip()
+CHAT_ID = os.getenv("CHAT_ID", "").strip()
 
+print("TOKEN exists:", bool(TOKEN))
+print("TOKEN length:", len(TOKEN) if TOKEN else 0)
+
+r = requests.get(f"https://api.telegram.org/bot{TOKEN}/getMe")
+print("getMe status:", r.status_code)
+print("getMe response:", r.text)
 app = Flask(__name__)
 
 @app.route('/')
