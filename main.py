@@ -5,8 +5,8 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from datetime import datetime
 
-TOKEN = os.getenv("AAFfZ7_4AowjTRgYS7qLMWS2RRXAyA8JXik")
-CHAT_ID = os.getenv("955971198")
+TOKEN = os.getenv("TELEGRAM_TOKEN")
+CHAT_ID = os.getenv("CHAT_ID")
 
 app = Flask(__name__)
 @app.route('/')
