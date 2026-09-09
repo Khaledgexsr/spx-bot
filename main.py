@@ -7,33 +7,44 @@ from datetime import datetime
 TOKEN = os.getenv("AAFfZ7_4AowjTRgYS7qLMWS2RRXAyA8JXik")
 CHAT_ID = os.getenv("955971198")
 
-def send_photo_and_text():
-    spx = yf.Ticker("^GSPC")
-    data = spx.history(period="5d", interval="5m")
-    last = data['Close'].iloc[-1]
-    vol = data['Volume'].iloc[-1]
-    
-    plt.figure(figsize=(10,4))
-    plt.plot(data['Close'], label='SPX')
-    plt.title(f"SPX: {last:.2f} | Volume: {vol}")
-    plt.legend()
-    plt.savefig("/tmp/spx.png")
-    plt.close()
-    
-    msg = f"📊 SPX Update {datetime.now().strftime('%H:%M')} KSA\nالسعر: {last:.2f}\nالفوليوم: {vol}\nhttps://www.tradingview.com/chart/?symbol=SPX"
-    
-    with open("/tmp/spx.png", "rb") as f:
-        requests.post(f"https://api.telegram.org/bot{TOKEN}/sendPhoto",
-                      data={"chat_id": CHAT_ID, "caption": msg},
-                      files={"photo": f})
+def check_and_send():
+    try:
+        spx = yf.Ticker("^GSPC")
+        df = spx.history(period="2d", interval="5m")
+        if df.empty: return
+        
+        last = df['Close'].iloc[-1]
+        prev = df['Close'].iloc[-2]
+        vol = df['Volume'].iloc[-1]
+        change = ((last - prev) / prev) * 100
+        
+        plt.figure(figsize=(10,5))
+        plt.style.use('dark_background')
+        plt.plot(df['Close'].tail(100), color='#00ff88', linewidth=2)
+        plt.title(f"SPX {last:.2f} ({change:+.2f}%) Vol: {vol:,.0f}", color='white')
+        plt.grid(alpha=0.2)
+        plt.tight_layout()
+        plt.savefig("/tmp/chart.png")
+        plt.close()
+        
+        caption = f"""📊 *SPX Update* {datetime.now().strftime('%H:%M KSA')}
+*السعر:* {last:.2f} ({change:+.2f}%)
+*الفوليوم:* {vol:,.0f}
+*التغير:* {'🟢 صاعد' if change>0 else '🔴 هابط'}
 
-# رسالة بداية
+🔗 [TradingView](https://www.tradingview.com/chart/?symbol=SPX)"""
+
+        with open("/tmp/chart.png", "rb") as f:
+            requests.post(f"https://api.telegram.org/bot{TOKEN}/sendPhoto",
+                          data={"chat_id": CHAT_ID, "caption": caption, "parse_mode": "Markdown"},
+                          files={"photo": f})
+    except Exception as e:
+        print(f"Error: {e}")
+
+# رسالة بدء
 requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-              data={"chat_id": CHAT_ID, "text": "✅ بوت SPX اشتغل مع الصور"})
+              data={"chat_id": CHAT_ID, "text": "✅ بوت SPX مع الفوليوم اشتغل"})
 
 while True:
-    try:
-        send_photo_and_text()
-    except Exception as e:
-        print(e)
+    check_and_send()
     time.sleep(300)
