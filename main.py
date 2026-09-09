@@ -4,8 +4,8 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from datetime import datetime
 
-TOKEN = os.getenv("TELEGRAM_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")
+TOKEN = os.getenv("AAFfZ7_4AowjTRgYS7qLMWS2RRXAyA8JXik")
+CHAT_ID = os.getenv("955971198")
 
 def send_photo_and_text():
     spx = yf.Ticker("^GSPC")
