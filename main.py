@@ -14,20 +14,18 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Bot Running Clean"
+    return "Bot Running Fixed"
 
 def get_market_data():
     headers = {"User-Agent": "Mozilla/5.0"}
     price = 7720.0
     vol = 65000
     market_type = "SPX"
-
     try:
         hour = datetime.now().hour
         is_open = 16 <= hour <= 22
         symbol = "^GSPC" if is_open else "ES=F"
         market_type = "SPX CASH" if is_open else "ES FUTURE"
-
         url_spy = "https://query1.finance.yahoo.com/v8/finance/chart/SPY?interval=1m&range=1d"
         r_spy = requests.get(url_spy, headers=headers, timeout=10)
         if r_spy.status_code == 200:
@@ -35,15 +33,14 @@ def get_market_data():
             vols = [v for v in q['volume'] if v]
             if vols:
                 vol = int(vols[-1])
-
         url = "https://query1.finance.yahoo.com/v8/finance/chart/" + symbol + "?interval=1m&range=1d"
         r = requests.get(url, headers=headers, timeout=10)
         if r.status_code == 200:
             closes = [c for c in r.json()['chart']['result'][0]['indicators']['quote'][0]['close'] if c]
             if closes:
                 price = float(closes[-1])
-    except Exception as e:
-        print(f"price error {e}")
+    except:
+        pass
 
     try:
         spx = yf.Ticker("^GSPC")
@@ -60,11 +57,11 @@ def get_market_data():
                     if pd.notna(v):
                         all_data.append({'strike': row['strike'], 'volume': float(v)})
         if all_data:
-            df_vol = pd.DataFrame(all_data).groupby('strike')['volume'].sum().reset_index().sort_values('strike')
+            df_vol = pd.DataFrame(all_data).groupby('strike')['volume'].sum().reset_index()
+            df_vol = df_vol.sort_values('strike')
         else:
             df_vol = None
-    except Exception as e:
-        print(f"options error {e}")
+    except:
         df_vol = None
 
     if df_vol is None or df_vol.empty:
@@ -72,52 +69,57 @@ def get_market_data():
             'strike':[7700,7705,7710,7715,7722,7725,7730,7735,7740,7745],
             'volume':[461,638,406,820,610,536,923,1000,753,512]
         })
-
     return price, vol, market_type, df_vol
 
 def plot_clean(price, df_vol):
     fig = plt.figure(figsize=(9, 10), facecolor='#050508')
-    ax = plt.gca()
+    ax = fig.add_subplot(111)
     ax.set_facecolor('#050508')
-    max_vol = df_vol['volume'].max()
+    max_vol = float(df_vol['volume'].max())
 
-    for _, row in df_vol.iterrows():
+    for idx, row in df_vol.iterrows():
         strike = int(row['strike'])
         v = int(row['volume'])
         width = v / max_vol * 0.65
-        ax.barh(strike, width, height=3.2, left=0.08, alpha=0.95, edgecolor='#ffcc00', linewidth=0.3)
-        ax.text(0.09, strike, f"{v}", color='white', va='center', fontsize=9, weight='bold')
+        ax.barh(strike, width, height=3.2, left=0.08, alpha=0.95)
+        ax.text(0.09, strike, str(v), color='white', va='center', fontsize=9, weight='bold')
 
     strikes = df_vol['strike'].values
-    x = np.linspace(0.08, 0.92, 120)
-    y1 = np.interp(x, np.linspace(0.08,0.92,len(strikes)), strikes[::-1]) + np.sin(x*15)*2
-    y2 = np.interp(x, np.linspace(0.08,0.92,len(strikes)), strikes) + np.cos(x*12)*2)
-    ax.plot(x, y1, color='#ff3b3b', lw=1.8, alpha=0.85)
-    ax.plot(x, y2, color='#00ff82', lw=1.8, alpha=0.85)
+    xs = np.linspace(0.08, 0.92, 120)
+    xp = np.linspace(0.08, 0.92, len(strikes))
+
+    # خطوط مبسطة بدون تعقيد اقواس
+    base1 = np.interp(xs, xp, strikes[::-1])
+    base2 = np.interp(xs, xp, strikes)
+    y1 = base1 + np.sin(xs*15.0)*2.0
+    y2 = base2 + np.cos(xs*12.0)*2.0
+
+    ax.plot(xs, y1, color='#ff3b3b', lw=1.8, alpha=0.85)
+    ax.plot(xs, y2, color='#00ff82', lw=1.8, alpha=0.85)
 
     for lvl in [7730, 7710, 7705]:
         if lvl in df_vol['strike'].values:
             c = '#00ff82' if lvl > price else '#ff3b3b'
             ax.axhline(lvl, color=c, ls='--', lw=1.2, alpha=0.7)
-            txt = "CALL " + str(int(lvl)) if lvl > price else "PUT " + str(int(lvl))
-            ax.text(0.94, lvl, txt, color=c, fontsize=10, va='center', weight='bold')
+            label = "CALL " + str(lvl) if lvl > price else "PUT " + str(lvl)
+            ax.text(0.94, lvl, label, color=c, fontsize=10, weight='bold', va='center')
 
     ax.set_ylim(7695, 7750)
     ax.set_xlim(0, 1)
     ax.set_yticks(df_vol['strike'])
     ax.set_yticklabels([str(int(s)) for s in df_vol['strike']], color='#00d4ff', fontsize=11)
-    for s in ax.spines.values():
-        s.set_visible(False)
+    for spine in ax.spines.values():
+        spine.set_visible(False)
 
-    plt.figtext(0.5, 0.03, str(int(price)), ha='center', color='#ffdd44', fontsize=32, weight='bold')
+    fig.text(0.5, 0.03, str(int(price)), ha='center', color='#ffdd44', fontsize=32, weight='bold')
     buf = BytesIO()
     plt.savefig(buf, format='png', facecolor='#050508', dpi=200, bbox_inches='tight')
     buf.seek(0)
-    plt.close()
+    plt.close(fig)
     return buf
 
 def loop():
-    print("CLEAN LOOP STARTED")
+    print("LOOP STARTED")
     last_vol0 = False
     while True:
         try:
@@ -125,22 +127,19 @@ def loop():
             now = datetime.now().strftime("%H:%M")
             if vol == 0:
                 if not last_vol0:
-                    requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-                        data={"chat_id": CHAT_ID, "text": f"Market closed {market_type} {price:.0f}"})
+                    requests.post("https://api.telegram.org/bot" + TOKEN + "/sendMessage",
+                        data={"chat_id": CHAT_ID, "text": "Market closed " + market_type})
                     last_vol0 = True
                 time.sleep(120)
                 continue
             last_vol0 = False
             chart = plot_clean(price, df_vol)
-            if vol < 50000:
-                cap = f"No Entry Vol {vol} < 50K\n{market_type} {price:.0f} {now}"
-            else:
-                cap = f"Vol {vol} > 50K OK\n{market_type} {price:.0f} {now}"
-            requests.post(f"https://api.telegram.org/bot{TOKEN}/sendPhoto",
+            cap = "Vol " + str(vol) + " " + market_type + " " + str(int(price)) + " " + now
+            requests.post("https://api.telegram.org/bot" + TOKEN + "/sendPhoto",
                 data={"chat_id": CHAT_ID, "caption": cap},
                 files={"photo": chart})
         except Exception as e:
-            print(e)
+            print(str(e))
         time.sleep(120)
 
 threading.Thread(target=loop, daemon=True).start()
