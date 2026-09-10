@@ -1,4 +1,6 @@
+yfinance==0.2.66
 requests
 matplotlib
 flask
 pandas
+numpy
