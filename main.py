@@ -1,183 +1,104 @@
-import os
-import time
-import requests
-import threading
-
-from flask import Flask
-
-import matplotlib
-matplotlib.use("Agg")
+import os, time, threading, yfinance as yf, requests
 import matplotlib.pyplot as plt
-
+from flask import Flask
+from io import BytesIO
 from datetime import datetime
 
-
-TOKEN = os.getenv("TELEGRAM_TOKEN", "").strip()
-CHAT_ID = os.getenv("CHAT_ID", "").strip()
-
-print("TOKEN exists:", bool(TOKEN), flush=True)
-print("TOKEN length:", len(TOKEN) if TOKEN else 0, flush=True)
-
-r = requests.get(
-    f"https://api.telegram.org/bot{TOKEN}/getMe",
-    timeout=10
-)
-
-print("getMe status:", r.status_code, flush=True)
-print("getMe response:", r.text, flush=True)
-
+TOKEN = os.getenv("TELEGRAM_TOKEN")
+CHAT_ID = os.getenv("CHAT_ID")
 
 app = Flask(__name__)
+@app.route('/')
+def home(): return "Bot 50K Rule Running"
 
-
-@app.route("/")
-def home():
-    return "Bot alive"
-
-
-def check_and_send():
+def send_chart():
     try:
-        print("Checking SPX...", flush=True)
+        spx = yf.download("^GSPC", period="1d", interval="1m", progress=False)
+        spy = yf.download("SPY", period="1d", interval="1m", progress=False)
+        if spx.empty or spy.empty:
+            print("No data")
+            return
 
-        headers = {
-            "User-Agent": "Mozilla/5.0"
-        }
+        price = float(spx['Close'].iloc[-1])
+        open_price = float(spx['Close'].iloc[0])
+        change = (price - open_price) / open_price * 100
 
-        url = "https://query1.finance.yahoo.com/v8/finance/chart/%5EGSPC?interval=5m&range=1d"
+        vol = spy['Volume']
+        avg_vol = vol.mean()
+        last_vol = int(vol.iloc[-1])
 
-        r = requests.get(
-            url,
-            headers=headers,
-            timeout=15
-        )
+        # VWAP
+        spy['typical'] = (spy['High'] + spy['Low'] + spy['Close']) / 3
+        spy['vwap'] = (spy['typical'] * spy['Volume']).cumsum() / spy['Volume'].cumsum()
+        vwap = float(spy['vwap'].iloc[-1])
 
-        print(f"Yahoo status: {r.status_code}", flush=True)
+        # اقوى مستوى فوليوم
+        high_vol_price = float(spy.loc[spy['Volume'].idxmax()]['Close'])
 
-        j = r.json()["chart"]["result"][0]
+        # ===== قاعدة 50K الذهبية =====
+        MIN_VOL = 50000
+        signal = ""
+        action = ""
 
-        closes = j["indicators"]["quote"][0]["close"]
-        closes = [c for c in closes if c is not None]
+        if last_vol < MIN_VOL:
+            signal = f"⚪ لا دخول\nالسبب: الفوليوم {last_vol:,} أقل من 50K"
+            action = f"انتظر فوليوم > 50K | VWAP: {vwap:.2f}"
+        elif price > vwap and price > high_vol_price:
+            signal = f"🟢 دخول CALL - فوليوم {last_vol:,}\nالسبب: فوق VWAP + فوق مستوى الفوليوم + فوق 50K"
+            action = f"الهدف: {price+5:.0f} | الوقف: {vwap:.0f}"
+        elif price < vwap and price < high_vol_price:
+            signal = f"🔴 دخول PUT - فوليوم {last_vol:,}\nالسبب: تحت VWAP + تحت مستوى الفوليوم + فوق 50K"
+            action = f"الهدف: {price-5:.0f} | الوقف: {vwap:.0f}"
+        else:
+            signal = f"⚪ انتظار حول VWAP\nفوليوم {last_vol:,} فوق 50K لكن السعر متردد"
+            action = f"VWAP: {vwap:.2f} | مستوى الفوليوم: {high_vol_price:.2f}"
 
-        last = closes[-1]
-        prev = closes[-2]
+        # الرسم - ستايل اسود مثل صورتك
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 5),
+            gridspec_kw={'height_ratios': [3, 1], 'hspace': 0.05}, facecolor='black')
 
-        change = (last - prev) / prev * 100
+        ax1.plot(spx['Close'], color='#00ff82', linewidth=1.2)
+        ax1.axhline(vwap, color='yellow', linestyle='--', linewidth=0.8, alpha=0.7, label='VWAP')
+        ax1.axhline(high_vol_price, color='white', linestyle=':', linewidth=0.8, alpha=0.5)
+        ax1.set_facecolor('black')
+        ax1.tick_params(colors='#666666', labelsize=7)
+        ax1.set_title(f'SPX {price:.2f} ({change:+.2f}%) | VWAP {vwap:.2f}', color='white', fontsize=9)
+        for s in ax1.spines.values(): s.set_visible(False)
 
-        plt.figure(figsize=(10, 5))
-        plt.style.use("dark_background")
+        colors = ['#00ff82' if c >= o else '#ff3b3b' for c, o in zip(spy['Close'], spy['Open'])]
+        ax2.bar(spy.index, spy['Volume'], color=colors, alpha=0.6, width=0.0006)
+        ax2.axhline(avg_vol, color='#666666', linestyle='--', linewidth=0.5)
+        ax2.axhline(MIN_VOL, color='red', linestyle='-', linewidth=1, alpha=0.8, label='50K')
+        ax2.set_facecolor('black')
+        ax2.tick_params(colors='#666666', labelsize=7)
+        ax2.set_ylabel(f'VOL >50K', color='#666666', fontsize=7)
+        for s in ax2.spines.values(): s.set_visible(False)
 
-        plt.plot(
-            closes[-100:],
-            color="#00ff88",
-            linewidth=2
-        )
-
-        plt.title(
-            f"SPX {last:.2f} ({change:+.2f}%)"
-        )
-
-        plt.grid(alpha=0.2)
-        plt.tight_layout()
-
-        plt.savefig("/tmp/chart.png")
+        buf = BytesIO()
+        plt.savefig(buf, format='png', facecolor='black', dpi=200, bbox_inches='tight')
+        buf.seek(0)
         plt.close()
 
-        cap = (
-            f"SPX {last:.2f} "
-            f"({change:+.2f}%) "
-            f"{datetime.now().strftime('%H:%M')}"
-        )
+        time_str = datetime.now().strftime("%H:%M")
+        caption = f"{signal}\n{action}\n\nSPX {price:.2f} {time_str}\nVol: {last_vol:,} | Avg: {int(avg_vol):,}\n\n⚠️ للتعليم فقط"
 
-        with open("/tmp/chart.png", "rb") as f:
-
-            res = requests.post(
-                f"https://api.telegram.org/bot{TOKEN}/sendPhoto",
-                data={
-                    "chat_id": CHAT_ID,
-                    "caption": cap
-                },
-                files={
-                    "photo": f
-                },
-                timeout=15
-            )
-
-            print(
-                f"Sent {res.status_code}",
-                flush=True
-            )
-
-            print(
-                f"Telegram response: {res.text}",
-                flush=True
-            )
+        r = requests.post(f"https://api.telegram.org/bot{TOKEN}/sendPhoto",
+            data={"chat_id": CHAT_ID, "caption": caption},
+            files={"photo": buf})
+        print(f"Sent {r.status_code} | Vol {last_vol} | Signal {signal[:20]}")
 
     except Exception as e:
-        print(
-            f"Error {e}",
-            flush=True
-        )
+        print(f"Error {e}")
 
-
-def bg():
-
-    print("Loop started", flush=True)
-
+def loop():
+    print("Loop started - 50K Rule")
     time.sleep(5)
-
-    try:
-
-        res = requests.post(
-            f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-            data={
-                "chat_id": CHAT_ID,
-                "text": "✅ بوت SPX اشتغل"
-            },
-            timeout=10
-        )
-
-        print(
-            "Start msg status:",
-            res.status_code,
-            flush=True
-        )
-
-        print(
-            "Start msg response:",
-            res.text,
-            flush=True
-        )
-
-    except Exception as e:
-
-        print(
-            f"Start fail {e}",
-            flush=True
-        )
-
+    send_chart()
     while True:
+        time.sleep(60)
+        now = datetime.now()
+        if 16 <= now.hour <= 23: # وقت السوق السعودي
+            send_chart()
 
-        check_and_send()
-
-        time.sleep(300)
-
-
-threading.Thread(
-    target=bg,
-    daemon=True
-).start()
-
-
-if __name__ == "__main__":
-
-    port = int(
-        os.environ.get(
-            "PORT",
-            10000
-        )
-    )
-
-    app.run(
-        host="0.0.0.0",
-        port=port
-    )
+threading.Thread(target=loop, daemon=True).start()
+app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
