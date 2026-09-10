@@ -1,4 +1,6 @@
-yfinance
-matplotlib
+yfinance==0.2.66
+curl-cffi
 requests
+matplotlib
 flask
+pandas
